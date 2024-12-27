@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 
@@ -21,6 +22,10 @@ WHATSAPP_API_ACCESS_TOKEN = os.getenv('WHATSAPP_API_ACCESS_TOKEN')
 META_API_DOMAIN = os.getenv('META_API_DOMAIN')
 SENDER_PHONE_NUMBER = os.getenv('SENDER_PHONE_NUMBER')
 
+# Configure Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 
 # Create your views here.
 class LoginView(FormView):
@@ -39,15 +44,19 @@ class LoginView(FormView):
         """
         email = form.cleaned_data.get('email')
         password = form.cleaned_data.get('password')
+        logger.info('Attempting to log in with email: %s', email)
         user = authenticate(self.request, username=email, password=password)
 
         if user is not None:
             if user.is_superuser:
                 login(self.request, user)
+                logger.info('Successfully logged in with email: %s', email)
                 return redirect(self.get_success_url())
             else:
+                logger.warning('Access denied for non-superuser: %s', email)
                 messages.error(self.request, 'Access denied: You are not a super admin.')
         else:
+            logger.info('Invalid credentials for email: %s', email)
             messages.error(self.request, 'Invalid email or password.')
 
         return super().form_invalid(form)
@@ -62,6 +71,7 @@ class LogoutView(View):
         """
            Logs out the current user and redirects to the login page.
         """
+        logger.info('Logging out user: %s', request.user.email)
         logout(request)
         return redirect('login')
 
@@ -85,8 +95,11 @@ class WebhookView(APIView):
         token = request.GET.get('hub.verify_token')
         challenge = request.GET.get('hub.challenge')
 
+        logger.info('Received webhook verification request.')
         if token == verify_token:
+            logger.info('Webhook verified successfully.')
             return HttpResponse(challenge, content_type="text/plain", status=200)
+        logger.error('Webhook verification failed. Invalid token: %s ', token)
         return JsonResponse({"error": "Invalid token"}, status=403)
 
     def post(self, request):
@@ -96,6 +109,7 @@ class WebhookView(APIView):
             Returns:
                 JsonResponse: A success or error message.
         """
+        logger.info('Received webhook event: %s.', request.data)
         try:
             data = request.data
 
@@ -118,10 +132,11 @@ class WebhookView(APIView):
                 timestamp=timestamp,
                 status='Received'
             )
-
+            logger.info("Message Processed successfully from sender: %s", sender)
             return JsonResponse({"status": "success", "message": "Message processed"}, status=200)
 
         except Exception as e:
+            logger.error('Error processing webhook event: %s', str(e))
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
 
@@ -148,6 +163,8 @@ class SendMessageView(View):
             phone_number = form.cleaned_data['phone_number']
             message = form.cleaned_data['message']
 
+            logger.info('Sending message to phone number: %s', phone_number)
+
             # WhatsApp API Endpoint
             api_url = f"{META_API_DOMAIN}/{WHATSAPP_PHONE_ID}/messages"
 
@@ -167,17 +184,23 @@ class SendMessageView(View):
                 "Authorization": f"Bearer {WHATSAPP_API_ACCESS_TOKEN}",
                 "Content-Type": "application/json"
             }
+            try:
+                # Make the API call
+                response = requests.post(api_url, json=payload, headers=headers)
 
-            # Make the API call
-            response = requests.post(api_url, json=payload, headers=headers)
-
-            # Check response status
-            if response.status_code == 200:
-                result_message = f"Message sent successfully to {phone_number}."
-                status = 'Sent'
-            else:
-                error_detail = response.json().get('error', {}).get('message', 'Unknown error')
-                result_message = f"Failed to send message to {phone_number}. Error: {error_detail}"
+                # Check response status
+                if response.status_code == 200:
+                    result_message = f"Message sent successfully to {phone_number}."
+                    status = 'Sent'
+                    logger.info('Successfully sent message to phone number: %s', phone_number)
+                else:
+                    error_detail = response.json().get('error', {}).get('message', 'Unknown error')
+                    result_message = f"Failed to send message to {phone_number}. Error: {error_detail}"
+                    status = 'Failed'
+                    logger.error('Failed to send message to phone number: %s', phone_number)
+            except Exception as e:
+                logger.error('Error sending message: %s', str(e))
+                result_message = f"An unexpected error occurred:{str(e)}"
                 status = 'Failed'
 
             # Store the message in the database
