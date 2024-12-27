@@ -1,6 +1,8 @@
+import json
 import os
 
 from django.http.response import JsonResponse
+from django.http import HttpResponse
 from rest_framework.views import APIView
 import requests
 
@@ -34,3 +36,18 @@ class SendMessage(APIView):
         response = requests.post(api_url, headers=headers, json=payload)
 
         return JsonResponse(response.json())
+
+class WebhookView(APIView):
+
+    def get(self, request):
+        VERIFICATION_TOKEN = os.getenv('VERIFICATION_TOKEN')
+        verify_token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge')
+        if verify_token == VERIFICATION_TOKEN:
+            return HttpResponse(challenge,status=200)
+        return JsonResponse({'error': 'Invalid verification token'},status=400)
+
+    def post(self, request):
+        json_data = request.data
+        print(json_data)
+        return JsonResponse({'error': 'Invalid verification token'},status=200)
